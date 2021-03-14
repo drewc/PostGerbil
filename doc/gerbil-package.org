@@ -1,0 +1,14 @@
+#+TITLE: Gerbil Package(s)
+
+#+begin_src scheme :tangle "../gerbil.pkg"
+(package: drewc)
+#+end_src
+
+#+begin_src scheme :tangle "../build.ss" :shebang "#!/usr/bin/env gxi"
+;; -*- Gerbil -*-
+
+(import :std/build-script)
+
+(defbuild-script
+  '("pg/pgpass" "pg/connect") verbose: 5)
+#+end_src

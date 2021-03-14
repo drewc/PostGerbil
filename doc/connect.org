@@ -1,0 +1,47 @@
+#+TITLE: Connect, to use our .pgpgass
+
+* Usage
+
+#+begin_src scheme
+(import :drewc/pg/connect)
+#+end_src
+
+The function ~connect~ takes the same args as [[file:Postgresql-Driver.org::#postgresqlConnect][~postgresql-connect~]].
+
+#+begin_src scheme
+(connect host: "localhost" user: "foo" db: "bar" passwd: "bat")
+#+end_src
+
+What makes it different is that we can use the [[file:pgpass.org::#pgpassLocation][~.pgpass~]] file to automagically
+set a password.
+
+
+#+begin_src scheme
+(connect host: "localhost" user: "foo" db: "bar")
+#+end_src
+
+* Code
+#+begin_src scheme :tangle ../pg/connect.ss
+(import :std/db/postgresql :drewc/pg/pgpass)
+(export connect)
+(def (connect
+      host: (host "127.0.0.1")
+      port: (port 5432)
+	  user: user
+	  passwd: (passwd #f)
+	  db: (db #f)
+	  pgpass-file: (pgpass-file #t))
+
+  (def actual-passwd
+    (or passwd
+	    (find-password host: host port: port
+		               user: user db: db
+		               pgpass: (if (eq? #t pgpass-file)
+				                 (find-pgpass-file)
+				                 pgpass-file))))
+  (postgresql-connect host: host
+		              port: port
+		              user: user
+		              passwd: actual-passwd
+		              db: db))
+#+end_src

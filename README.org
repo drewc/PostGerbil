@@ -1,0 +1,98 @@
+#+TITLE: PostGerbil: PostgreSQL and Gerbil, together at last
+
+This is a [[https://en.wikipedia.org/wiki/Monorepo][monorepo]] for a bunch of thingies involving [[https://www.postgresql.org/][PostgreSQL]] and [[https://cons.io/][Gerbil
+Scheme]].
+
+
+* Literate Code and Documentation
+
+This code is mostly implemented in a [[https://en.wikipedia.org/wiki/Literate_programming][Literate Programming]] style using [[https://orgmode.org/][Org mode.]]
+The code is all contained in ~.org~ files, usually in ~./doc/~.
+
+** Tangle : Extracting Source
+
+   So, to tangle code in emacs, ~org-babel-tangle-file~ is the function, and the
+   interactive ~org-babel-tangle (C-c C-v C-t)~ is of good use if you happen to
+   use emacs as your editor.
+
+ #+begin_src scheme :tangle "tangle.ss" :shebang "#!/usr/bin/env gxi"
+(import :std/misc/process)
+  ;; # Change to where this file lives
+  ;;  cd "$(dirname "$0")"
+
+(def srcdir (path-normalize (path-directory (this-source-file))))
+
+(def source-of-source '("README.org" "doc/pgpass.org" "doc/connect.org" "doc/gerbil-package.org"))
+
+;; # Use Emacs to tangle the files.
+;;    tangle() {
+;;        emacs --batch -l org --eval "(org-babel-tangle-file \"$1\")"
+;;    }
+
+(def (tangle srcdir file)
+  (display
+   (run-process ["emacs" "--batch" "-l" "org" "--eval"
+                 (string-append" (print (org-babel-tangle-file \""file"\"))")]
+                directory: srcdir)))
+
+;; # Tangle the files!
+
+(for-each (cut tangle srcdir <>) source-of-source)
+
+ #+end_src
+
+
+** SLIME and Source Blocks
+
+   One of the nice things about *REPL*'s and interactive development is just
+   that. Emacs has great support for such things. As a former Common Lisp
+   addict, [[https://common-lisp.net/project/slime/doc/html/][*SLIME*]] and *SWANK* are a wonderful way to use an *inferior lisp*.
+
+   First, install the ~github.com/drewc/gerbil-swank~ package.
+
+   #+begin_src shell
+     gxpkg install github.com/drewc/gerbil-swank
+   #+end_src
+
+   Make sure you have slime installed and configured in your emacs init file.
+
+   #+BEGIN_SRC emacs-lisp
+     (require 'package)
+     (add-to-list 'package-archives
+                  '("melpa" . "https://melpa.org/packages/") t)
+
+     (package-refresh-contents)
+     (package-initialize)
+     (package-install use-package)
+
+     (use-package slime
+       :ensure  t
+       :config (setq inferior-lisp-program "sbcl")
+       (setq slime-contribs '(slime-fancy slime-tramp)))
+
+     (use-package slime-company :ensure t
+       :config (setq slime-contribs (cons 'slime-company slime-contribs)))
+   #+END_SRC
+
+   If you're using ~gerbil-mode~ as you should, add the hook.
+
+   #+begin_src shell
+     cd ~/.emacs.d/ && git clone -n --depth 1 https://github.com/vyzo/gerbil.git
+     cd gerbil && git checkout HEAD etc/gerbil.el
+     git mv etc/gerbil.el . && rmdir etc
+   #+end_src
+
+   #+BEGIN_SRC emacs-lisp
+     (add-to-list 'load-path "~/.emacs.d/gerbil")
+     (require 'gerbil)
+     (add-hook 'gerbil-mode-hook 'slime-mode)
+   #+end_src
+
+
+   In a shell, open a swank server.
+
+   #+begin_src shell
+     gxi -e "(import :drewc/gerbil-swank)" -e "(start-swank 4006)"
+   #+end_src
+
+   In emacs, ~M-x slime-connect~, ~localhost~, ~4006~, and BAM! We've got a *REPL*!

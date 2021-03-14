@@ -1,0 +1,216 @@
+#+TITLE: PostgreSQL Driver
+
+* For Markdown export into Gerbil source we need this nesting perhaps
+
+** PostgreSQL driver
+ #+begin_src scheme
+(import :std/db/postgresql)
+ #+end_src
+
+Have a look at [[https://github.com/vyzo/gerbil/blob/master/src/std/db/postgresql-test.ss][the postgresql-test.ss file]] to see more of how it is used with
+the ~:std/db/dbi~.
+
+*** ~postgresql-connect~
+:PROPERTIES:
+:CUSTOM_ID: postgresqlConnect
+:END:
+
+The first way is simply to use the function.
+
+#+begin_src scheme
+(postgresql-connect host: "localhost" user: "foo" passwd: "bar")
+;; => #<postgresql-connection #36>
+#+end_src
+
+But, often, we may want to close the connection when garbage collected so we,
+the developer, don't need to worry about hanging connections. Thus,
+~std/db/dbi#sql-connect~ is often the better choice as it ~will~'s the
+~sql-close~ into being.
+
+#+begin_src scheme
+(import :std/db/dbi)
+(def pg (sql-connect postgresql-connect host: "localhost" user: "foo" passwd: "bar"))
+;; => #<postgresql-connection #36>
+#+end_src
+
+*** ~defcatalog~, Postgresql->Gerbil->Postgresql mapping
+:PROPERTIES:
+:CUSTOM_ID: defcatalog
+:END:
+
+A catalog tells us what to do with what postgresql gives us.
+
+Here's the basic syntax.
+
+#+begin_src scheme
+((_ (name mixin ...) (oids serialize deserialize) ...)
+#+end_src
+
+A mixin is not always needed. Here is our first version.
+
+#+begin_src scheme
+(defcatalog my-default-catalog
+  ;; BOOLOID
+  ((16) (lambda _ "TRUE") (lambda _ 42))
+  ;; INT8OID INT2OID INT4OID FLOAT4OID FLOAT8OID NUMERICOID
+  ((20 21 23 700 701 1700) (lambda _ "42") (lambda _ 42)))
+#+end_src
+
+Try it out by ~parameterize~'ing the [[#currentCatalog][~current-catalog~]].
+
+#+begin_src scheme
+(parameterize ((current-catalog my-default-catalog))
+  (sql-eval-query pg "SELECT 1, FALSE WHERE $1" 'hey-you))
+;; => (#(42 42))
+#+end_src
+
+*** ~defcatalog-default~
+
+By default there is a [[#defaultCatalog][~default-catalog~]]. If we want to declare a new type within
+the default this is where to go.
+
+For example, *PostgreSQL* has a *JSON* type.
+
+#+begin_src scheme
+(let (stmt (sql-prepare pg "SELECT typname, oid FROM pg_catalog.pg_type WHERE typname ILIKE '%json%'"))
+          (cons (sql-columns stmt) (sql-query stmt)))
+
+;; => (("typname" "oid") #("json" "114") #("jsonb" "3802") #("jsonpath" "4072")
+;;      #("_json" "199") #("_jsonb" "3807") #("_jsonpath" "4073"))
+#+end_src
+
+And, *Gerbil* does as well! Actually, the ~:std/test/json~ just turns it into a hash table.
+
+First we see the ~oid~'s for postgres' json types. Select them as JSON to see
+that as well.
+
+#+begin_src scheme
+(import :std/text/json)
+
+(def res
+  (let (stmt
+        (sql-prepare pg "SELECT json_build_object(typname, oid)
+  FROM pg_catalog.pg_type WHERE typname ILIKE '%json%'"))
+
+          (cons (sql-columns stmt) (sql-query stmt))))
+;; => (("json_build_object") "{\"json\" : \"114\"}" "{\"jsonb\" : \"3802\"}"
+;;      "{\"jsonpath\" : \"4072\"}" "{\"_json\" : \"199\"}" "{\"_jsonb\" :
+;;      \"3807\"}" "{\"_jsonpath\" : \"4073\"}")
+;;
+
+(def json-res (map (cut call-with-input-string <> read-json) (cdr res)))
+
+(map table->list json-res)
+;; => (((json . "114")) ((jsonb . "3802")) ((jsonpath . "4072"))
+;;    ((_json . "199")) ((_jsonb . "3807")) ((_jsonpath . "4073")))
+#+end_src
+
+All we need is to (de)serialize them...
+
+#+begin_src scheme
+(def (serialize-json gerbil-json)
+ (call-with-output-string "" (cut write-json gerbil-json <>)))
+
+(def (deserialize-json str)
+  (call-with-input-string str read-json))
+#+end_src
+
+... and add them to the default catalog.
+
+#+begin_src scheme
+(defcatalog-default ((114 3802) serialize-json deserialize-json))
+#+end_src
+
+Now our query return hash tables.
+
+#+begin_src scheme
+(let (stmt (sql-prepare pg "SELECT json_build_object(typname, oid) FROM pg_catalog.pg_type WHERE typname ILIKE '%json%'"))
+  (cons (sql-columns stmt) (sql-query stmt)))
+;; => (("json_build_object") #<table #47> #<table #48> #<table #49> #<table #50>
+;;      #<table #51> #<table #52>)
+#+end_src
+
+Even better, we can pass them to queries!
+
+#+begin_src scheme
+(let (stmt (sql-prepare pg "SELECT * from json_each_text($1)"))
+  (cons (sql-columns stmt) (begin (sql-bind stmt (list->hash-table '(("foo" . 1) ("bar" . "baz"))))
+                                  (sql-query stmt))))
+;; => (("key" "value") #("bar" "baz") #("foo" "1"))
+#+end_src
+
+*** ~default-catalog~
+:PROPERTIES:
+:CUSTOM_ID: defaultCatalog
+:END:
+
+What if we only want to change certain things from the default and not have them
+be default, yet still have most of the default (de)serializers available?
+~default-catalog~ and [[#defcatalog][~defcatalog~]] to the rescue.
+
+Yes, mixin time!
+
+First, note the difference. The default has a timestamp whereas ours does not.
+
+#+begin_src scheme
+(sql-eval-query pg "SELECT '2021-03-12'::timestamp, 1")
+;; => (#(#<date #57 nanosecond: 0 second: 0 minute: 0 hour: 0 day: 12 month: 3
+;;       year: 2021 zone-offset: 0> 1))
+(parameterize ((current-catalog my-default-catalog))
+  (sql-eval-query pg "SELECT '2021-03-12'::timestamp, 1"))
+;;=> (#("2021-03-12 00:00:00" 42))
+#+end_src
+
+Make a new catalog with some mixins.
+
+#+begin_src scheme
+(defcatalog (united-default-catalog my-default-catalog default-catalog))
+#+end_src
+
+Which works as expected.
+
+#+begin_src scheme
+(parameterize ((current-catalog united-default-catalog))
+  (sql-eval-query pg "SELECT '2021-03-12'::timestamp, 1"))
+;; => (#(#<date #58 nanosecond: 0 second: 0 minute: 0 hour: 0 day: 12 month: 3
+;;         year: 2021 zone-offset: 0> 42))
+#+end_src
+
+*** ~current-catalog~
+:PROPERTIES:
+:CUSTOM_ID: currentCatalog
+:END:
+
+ The ~current-catalog~ parameter determines which catalog is used by default.
+
+ #+begin_src scheme
+(eq? (current-catalog) default-catalog) ;; =? #t
+ #+end_src
+
+ We can ~parameterize~ it.
+
+ #+begin_src scheme
+ [ (parameterize ((current-catalog my-default-catalog))
+     (sql-eval-query pg "SELECT '2021-03-12'::timestamp, 1"))
+   (parameterize ((current-catalog united-default-catalog))
+     (sql-eval-query pg "SELECT '2021-03-12'::timestamp, 1")) ]
+;; => ( (#("2021-03-12 00:00:00" 42))
+;;      (#(#<date #62 nanosecond: 0 second: 0 minute: 0 hour: 0 day: 12 month: 3
+;    ;       year: 2021 zone-offset: 0> 42)))
+ #+end_src
+
+ Use it to declare a global default.
+
+ #+begin_src scheme
+(current-catalog my-default-catalog)
+
+(sql-eval-query pg "SELECT 1") ;; => (42)
+ #+end_src
+
+ Don't forget to set it back :).
+
+ #+begin_src scheme
+(current-catalog default-catalog)
+
+(sql-eval-query pg "SELECT 1") ;; => (1)
+ #+end_src

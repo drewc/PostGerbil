@@ -1,0 +1,36 @@
+#+TITLE: A Basic Start
+
+* Steal git@github.com:drewc/gerbil-postgresql.git
+
+#+begin_src shell
+git clone git@github.com:drewc/gerbil-postgresql.git
+#+end_src
+
+First, we have the use of ~.pgpass~.
+
+* Org Mode Things
+
+** ~org-link-file-path-type~
+
+
+The variable you need to customize is ~org-link-file-path-type~.
+
+*** Documentation
+
+How the path name in file links should be stored.
+
+Valid values are:
+
+- relative ::  Relative to the current directory, i.e. the directory of the file
+  into which the link is being inserted.
+
+- absolute ::  Absolute path, if possible with ~ for home directory.
+
+- noabbrev ::  Absolute path, no abbreviation of home directory.
+
+- adaptive ::  Use relative path for files in the current directory and
+  sub-directories of it. For other files, use an absolute path.
+
+#+begin_src emacs-lisp
+(setf org-link-file-path-type 'relative)
+#+end_src
